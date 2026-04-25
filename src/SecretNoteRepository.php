@@ -12,12 +12,12 @@ final class SecretNoteRepository
     ) {
         $directory = dirname($this->filePath);
 
-        if (!is_dir($directory)) {
-            mkdir($directory, 0777, true);
+        if (!is_dir($directory) && !mkdir($directory, 0777, true) && !is_dir($directory)) {
+            throw new RuntimeException('Storage directory could not be created.');
         }
 
-        if (!file_exists($this->filePath)) {
-            file_put_contents($this->filePath, json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        if (!file_exists($this->filePath) && file_put_contents($this->filePath, "[]\n", LOCK_EX) === false) {
+            throw new RuntimeException('Storage file could not be created.');
         }
     }
 
@@ -26,10 +26,10 @@ final class SecretNoteRepository
      *
      * @param array<string, string> $data
      */
-    public function add(array $data): void
+    public function add(array $data): array
     {
         $items = $this->read();
-        $items[] = [
+        $note = [
             'id' => uniqid('note_', true),
             'title' => $data['title'],
             'author' => $data['author'],
@@ -40,8 +40,14 @@ final class SecretNoteRepository
             'visibility' => ($data['visibility'] ?? '') === 'public' ? 'public' : 'private',
             'updated_at' => date('Y-m-d'),
         ];
+        $items[] = $note;
 
-        file_put_contents($this->filePath, json_encode($items, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        $json = json_encode($items, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        if ($json === false || file_put_contents($this->filePath, $json . PHP_EOL, LOCK_EX) === false) {
+            throw new RuntimeException('Storage file could not be written.');
+        }
+
+        return $note;
     }
 
     /**

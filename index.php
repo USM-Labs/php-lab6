@@ -10,21 +10,48 @@ $validator = new SecretNoteValidator();
 $errors = [];
 $success = false;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $data = [
-        'title' => trim((string) ($_POST['title'] ?? '')),
-        'author' => trim((string) ($_POST['author'] ?? '')),
-        'category' => trim((string) ($_POST['category'] ?? '')),
-        'mood' => trim((string) ($_POST['mood'] ?? '')),
-        'confession' => trim((string) ($_POST['confession'] ?? '')),
-        'created_at' => trim((string) ($_POST['created_at'] ?? '')),
-        'visibility' => trim((string) ($_POST['visibility'] ?? '')),
-    ];
+if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+    $data = noteDataFromArray(readPutPayload());
+    $errors = $validator->validate($data);
 
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($errors === []) {
+        try {
+            $note = $repository->add($data);
+            http_response_code(200);
+            echo json_encode(['success' => true, 'note' => $note], JSON_UNESCAPED_UNICODE);
+        } catch (RuntimeException $exception) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'errors' => [$exception->getMessage()]], JSON_UNESCAPED_UNICODE);
+        }
+    } else {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'errors' => $errors], JSON_UNESCAPED_UNICODE);
+    }
+
+    exit;
+}
+
+if (!in_array($_SERVER['REQUEST_METHOD'], ['GET', 'POST'], true)) {
+    http_response_code(405);
+    header('Allow: GET, POST, PUT');
+    exit('Method not allowed.');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $data = noteDataFromArray($_POST);
     $errors = $validator->validate($data);
 
     if ($errors === []) {
-        $repository->add($data);
+        try {
+            $repository->add($data);
+        } catch (RuntimeException $exception) {
+            $errors[] = $exception->getMessage();
+        }
+    }
+
+    if ($errors === []) {
         $success = true;
         $_POST = [];
     }
@@ -36,6 +63,51 @@ $notes = $repository->all($sort);
 function oldValue(string $field): string
 {
     return htmlspecialchars((string) ($_POST[$field] ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * @param array<string, mixed> $source
+ * @return array<string, string>
+ */
+function noteDataFromArray(array $source): array
+{
+    return [
+        'title' => trim((string) ($source['title'] ?? '')),
+        'author' => trim((string) ($source['author'] ?? '')),
+        'category' => trim((string) ($source['category'] ?? '')),
+        'mood' => trim((string) ($source['mood'] ?? '')),
+        'confession' => trim((string) ($source['confession'] ?? '')),
+        'created_at' => trim((string) ($source['created_at'] ?? '')),
+        'visibility' => normalizeVisibility($source['visibility'] ?? ''),
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function readPutPayload(): array
+{
+    $rawBody = file_get_contents('php://input');
+    if ($rawBody === false || trim($rawBody) === '') {
+        return [];
+    }
+
+    $decoded = json_decode($rawBody, true);
+    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+        return $decoded;
+    }
+
+    parse_str($rawBody, $parsed);
+    return $parsed;
+}
+
+function normalizeVisibility(mixed $visibility): string
+{
+    if ($visibility === true || $visibility === 1 || $visibility === '1' || $visibility === 'yes') {
+        return 'public';
+    }
+
+    return trim((string) $visibility);
 }
 ?>
 <!doctype html>
